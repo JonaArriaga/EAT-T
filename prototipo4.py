@@ -1,15 +1,26 @@
-from flask import Flask, request, render_template_string, redirect
+from flask import Flask, request, render_template_string
 import datetime
 import requests
-
-ARCHIVO = "alimentos.txt"
+import boto3
+import uuid
 
 app = Flask(__name__)
 
-# ---------------------------------------------------------
-# HTML COMPLETO DEL ESCÁNER (Pegado tal cual lo tenías)
-# ---------------------------------------------------------
-HTML_FORM = """
+# --------------------------------------------
+# 🔵 CONFIGURACIÓN DynamoDB LOCAL
+# --------------------------------------------
+dynamodb = boto3.resource(
+    'dynamodb',
+    region_name='sa-east-1',
+    endpoint_url='http://localhost:8000'
+)
+
+TABLA = dynamodb.Table("InventarioAlimentos")
+
+# --------------------------------------------
+# 🔵 HTML (igual que el tuyo)
+# --------------------------------------------
+HTML_FORM = """ 
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -89,17 +100,19 @@ document.getElementById("file-input").addEventListener("change", function(e) {
 </html>
 """
 
-# ---------------------------------------------------------
-# FUNCIÓN PARA AGREGAR AL ARCHIVO
-# ---------------------------------------------------------
+# --------------------------------------------
+# 🔵 Fun: Guardar en DynamoDB
+# --------------------------------------------
 def agregar_alimento(codigo, cantidad=1, fecha_venc="N/A"):
+    # Obtener nombre del producto desde OpenFoodFacts
     try:
         resp = requests.get(f"https://world.openfoodfacts.org/api/v2/product/{codigo}.json", timeout=5)
         data = resp.json()
+
         if data.get("status") == 1:
-            producto = data["product"]
-            tipo = producto.get("product_name", "Desconocido")
-            marca = producto.get("brands", "N/A")
+            prod = data["product"]
+            tipo = prod.get("product_name", "Desconocido")
+            marca = prod.get("brands", "N/A")
             info_extra = f"Marca: {marca}"
         else:
             tipo = "Producto no encontrado"
@@ -109,16 +122,25 @@ def agregar_alimento(codigo, cantidad=1, fecha_venc="N/A"):
         info_extra = str(e)
 
     fecha_compra = datetime.date.today().strftime("%d/%m/%Y")
-    info = f"Código: {codigo} {info_extra}"
 
-    with open(ARCHIVO, "a", encoding="utf-8") as f:
-        f.write(f"{tipo},{cantidad},{fecha_compra},{fecha_venc},{info}\n")
+    # DynamoDB requiere strings
+    ts = datetime.datetime.utcnow().isoformat()
 
+    TABLA.put_item(
+        Item={
+            "codigo": str(codigo),
+            "ts": ts,
+            "tipo": tipo,
+            "cantidad": int(cantidad),
+            "fecha_compra": fecha_compra,
+            "fecha_venc": fecha_venc or "N/A",
+            "info": info_extra,
+        }
+    )
 
-# ---------------------------------------------------------
-# RUTAS FLASK
-# ---------------------------------------------------------
-
+# --------------------------------------------
+# 🔵 Rutas
+# --------------------------------------------
 @app.route("/")
 def index():
     return render_template_string(HTML_FORM)
@@ -142,29 +164,37 @@ def recibir_codigo():
 
 @app.route("/inventario")
 def inventario():
-    try:
-        with open(ARCHIVO, "r", encoding="utf-8") as f:
-            filas = [l.strip().split(",") for l in f]
-    except:
-        filas = []
+    # Escanea la tabla completa
+    datos = TABLA.scan().get("Items", [])
 
     html = """
     <h2>📦 Inventario</h2>
     <table border='1' cellpadding='8'>
     <tr>
-      <th>Tipo</th><th>Cantidad</th><th>Fecha Compra</th><th>Fecha Venc</th><th>Info</th>
+      <th>Código</th><th>Tipo</th><th>Cantidad</th>
+      <th>Fecha Compra</th><th>Fecha Venc</th><th>Info</th>
     </tr>
     """
 
-    for fila in filas:
-        html += "<tr>" + "".join(f"<td>{c}</td>" for c in fila) + "</tr>"
+    for item in sorted(datos, key=lambda x: (x["codigo"], x["ts"])):
+        html += f"""
+        <tr>
+          <td>{item['codigo']}</td>
+          <td>{item['tipo']}</td>
+          <td>{item['cantidad']}</td>
+          <td>{item['fecha_compra']}</td>
+          <td>{item['fecha_venc']}</td>
+          <td>{item['info']}</td>
+        </tr>
+        """
 
     html += "</table><br><a href='/'>⬅ Volver</a>"
     return html
 
 
-# ---------------------------------------------------------
-# INICIO SERVIDOR
-# ---------------------------------------------------------
+# --------------------------------------------
+# 🔵 Iniciar servidor
+# --------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
