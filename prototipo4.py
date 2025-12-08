@@ -15,7 +15,7 @@ dynamodb = boto3.resource(
     endpoint_url='http://localhost:8000'
 )
 
-TABLA = dynamodb.Table("InventarioAlimentos")
+TABLA = dynamodb.Table("Alimentos")
 
 # --------------------------------------------
 # 🔵 HTML (igual que el tuyo)
@@ -104,7 +104,6 @@ document.getElementById("file-input").addEventListener("change", function(e) {
 # 🔵 Fun: Guardar en DynamoDB
 # --------------------------------------------
 def agregar_alimento(codigo, cantidad=1, fecha_venc="N/A"):
-    # Obtener nombre del producto desde OpenFoodFacts
     try:
         resp = requests.get(f"https://world.openfoodfacts.org/api/v2/product/{codigo}.json", timeout=5)
         data = resp.json()
@@ -122,8 +121,6 @@ def agregar_alimento(codigo, cantidad=1, fecha_venc="N/A"):
         info_extra = str(e)
 
     fecha_compra = datetime.date.today().strftime("%d/%m/%Y")
-
-    # DynamoDB requiere strings
     ts = datetime.datetime.utcnow().isoformat()
 
     TABLA.put_item(
@@ -137,7 +134,7 @@ def agregar_alimento(codigo, cantidad=1, fecha_venc="N/A"):
             "info": info_extra,
         }
     )
-
+    
 # --------------------------------------------
 # 🔵 Rutas
 # --------------------------------------------
