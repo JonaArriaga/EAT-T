@@ -3,6 +3,8 @@ import datetime
 import requests
 import boto3
 import uuid
+from flask_cors import CORS
+CORS(app)
 
 app = Flask(__name__)
 
